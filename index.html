@@ -548,17 +548,16 @@
 <div class="bubble-toast" id="toast"></div>
 
 <script>
-    // ================== 1. 基础配置（必须修改！）===================
-    // 1.1 LeanCloud云数据库配置（替换为你的LeanCloud AppID、AppKey、服务器地址）
+    // 1.1 LeanCloud云数据库配置（LeanCloud AppID、AppKey、服务器地址）
     const LEANCLOUD_CONFIG = {
         appId: "SBpOzHNBRBVEROKU5GhwtNPl-gzGzoHsz",
         appKey: "NdU8hjwV0ym4XtsWlBd777FM",
         serverURL: "https://sbpozhnb.lc-cn-n1-shared.com"
     };
     // 1.2 二维码指向的URL
-    const MOBILE_URL = "https://qinlan.github.io";
+    const MOBILE_URL = "https://JW-Demo12138.github.io";
 
-    // ================== 2. 初始化依赖 ===================
+    // ================== 初始化依赖 ===================
     const toast = document.getElementById('toast');
     const whoInput = document.getElementById('who');
     const msgInput = document.getElementById('msg');
@@ -579,7 +578,7 @@
         AV.init(LEANCLOUD_CONFIG);
         showToast('云数据库连接成功～', 'success');
     } catch (error) {
-        showToast('云数据库初始化失败，请检查配置', 'error');
+        showToast('云数据库初始化失败，Call给JW', 'error');
         console.error('LeanCloud初始化错误：', error);
     }
 
