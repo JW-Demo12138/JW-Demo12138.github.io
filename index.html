@@ -545,7 +545,7 @@
                 type="text"
                 class="wave-input"
                 id="msg"
-                placeholder="一句真挚的话，就能温暖整个海洋～"
+                placeholder="听我说谢谢你 因为有你 温暖了四季～"
                 maxlength="40"
         >
 
@@ -693,23 +693,26 @@
 
     // ================== 云数据库数据管理 ===================
     // 获取所有感谢数据（从云数据库拉取）
-    async function getGratitudeData() {
-        try {
-            const query = new AV.Query('gratitude');
-            query.descending('createdAt'); // 按提交时间倒序
-            const results = await query.find();
-            return results.map(item => ({
-                id: item.id,
-                who: item.get('who') || '',
-                msg: item.get('msg') || '',
-                timestamp: item.get('createdAt').getTime()
-            }));
-        } catch (error) {
-            showToast('数据获取失败', 'error');
-            console.error('获取数据错误：', error);
-            return [];
-        }
+   async function getGratitudeData() {
+    try {
+        const query = new AV.Query('gratitude');
+        query.descending('createdAt'); // 按提交时间倒序
+        query.limit(1000); // 关键：手动设置最大查询数（支持最多1000条）
+        const results = await query.find(); // 现在会返回最多1000条数据
+        const dataList = results.map(item => ({
+            id: item.id,
+            who: item.get('who') || '',
+            msg: item.get('msg') || '',
+            timestamp: item.get('createdAt').getTime()
+        }));
+        console.log('实际加载数据条数：', dataList.length); // 控制台验证是否300条
+        return dataList;
+    } catch (error) {
+        showToast('数据获取失败', 'error');
+        console.error('获取数据错误：', error);
+        return [];
     }
+}
 
     // 添加新的感谢数据（提交到云数据库）
     async function addGratitudeData(who, msg) {
