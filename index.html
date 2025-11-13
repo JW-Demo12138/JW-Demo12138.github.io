@@ -4,10 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>感恩的海洋</title>
-    <!-- 新增：引入二维码生成库 -->
-
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
-    <!-- 新增：引入LeanCloud云数据库SDK -->
     <script src="https://cdn.jsdelivr.net/npm/leancloud-storage@4.15.0/dist/av-min.js"></script>
     <style>
         /* 全局样式：沉浸式海洋氛围 */
@@ -35,6 +32,7 @@
 
         /* 涟漪画布（底层动画） */
         #gratitudeCanvas { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 2; }
+        #showcaseCanvas { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 11; pointer-events: none; }
 
         /* 右上角图标按钮 */
         .corner-btn {
@@ -355,18 +353,34 @@
         .showcase-gratitude {
             position: absolute;
             color: #fff;
-            font-size: 1.4rem;
+            font-size: clamp(0.9rem, 2.5vw, 1.2rem);
             text-shadow: 0 3px 15px rgba(0,0,0,0.2);
             opacity: 0;
             pointer-events: none;
-            padding: 15px 25px;
+            padding: clamp(8px, 1.5vw, 12px) clamp(12px, 2vw, 20px);
             border-radius: 50px;
             background: linear-gradient(90deg, rgba(255,255,255,0.2), rgba(255,255,255,0.05));
             box-shadow: 0 0 30px rgba(255, 255, 255, 0.15);
             backdrop-filter: blur(5px);
             will-change: left, top, opacity, transform;
-            animation: showcaseFloatIn 1s forwards ease-out;
+            animation: fadeIn 1s forwards ease-out;
+            max-width: 70%;
+            word-break: break-word;
         }
+
+        /* 气泡动画效果 */
+        @keyframes fadeIn {
+            0% { opacity: 0; transform: scale(0.8); }
+            20% { opacity: 0.9; transform: scale(1.05); }
+            80% { opacity: 0.9; transform: scale(1); }
+            100% { opacity: 0.9; transform: scale(1); }
+        }
+
+        @keyframes fadeOut {
+            0% { opacity: 0.9; transform: scale(1); }
+            100% { opacity: 0; transform: scale(0.8); }
+        }
+
         /* 展示界面背景装饰：动态气泡 */
         .bubble {
             position: absolute;
@@ -445,10 +459,6 @@
             0% { opacity: 0; transform: translateY(20px) scale(0.9); }
             100% { opacity: 0.95; transform: translateY(0) scale(1); }
         }
-        @keyframes showcaseFloatIn {
-            0% { opacity: 0; transform: translateY(30px) scale(0.8); }
-            100% { opacity: 0.9; transform: translateY(0) scale(1); }
-        }
         @keyframes rise {
             0% { transform: translateY(100vh) scale(0.5); opacity: 0; }
             10% { opacity: 0.7; }
@@ -470,6 +480,31 @@
             .wave-input { padding: 16px 18px; font-size: 15px; }
             .qrcode-section { padding: 20px 15px; }
             #qrcodeCanvas { width: 180px; height: 180px; }
+
+            /* 第二页移动端优化 */
+            .showcase-header {
+                padding: 15px 20px;
+            }
+            .showcase-title {
+                font-size: 18px;
+            }
+            .back-btn {
+                padding: 8px 15px;
+                font-size: 14px;
+            }
+            .stats-bar {
+                gap: 15px;
+                font-size: 12px;
+            }
+            .stat-value {
+                font-size: 15px;
+            }
+
+            /* 限制移动端同时显示的弹幕数量 */
+            .showcase-content .showcase-gratitude {
+                font-size: 0.8rem;
+                padding: 6px 12px;
+            }
         }
     </style>
 </head>
@@ -533,6 +568,7 @@
 
 <!-- 全屏弹幕展示界面 -->
 <div class="showcase-container" id="showcaseContainer">
+    <canvas id="showcaseCanvas"></canvas>
     <div class="showcase-header">
         <h2 class="showcase-title">感恩的海洋 · 全景展示</h2>
         <button class="back-btn" id="backBtn">返回书写</button>
@@ -557,6 +593,18 @@
     // 1.2 二维码指向的URL
     const MOBILE_URL = "https://JW-Demo12138.github.io";
 
+    // 配置参数 - 可根据需要调整
+    const CONFIG = {
+        // 根据屏幕尺寸限制最大显示数量
+        maxShowcaseItems: window.innerWidth < 768 ? 10 : 20, // 减少同时显示数量，提升性能
+        // 弹幕显示时长范围（秒）
+        itemLifeRange: [15, 25], // 延长停留时间
+        // 弹幕频率限制：3秒内最多5条
+        maxItemsPerWindow: 5,
+        timeWindow: 3000, // 时间窗口（毫秒）
+        itemInterval: 600 // 每条弹幕生成间隔（毫秒）
+    };
+
     // ================== 初始化依赖 ===================
     const toast = document.getElementById('toast');
     const whoInput = document.getElementById('who');
@@ -572,6 +620,16 @@
     const whoCount = document.getElementById('whoCount');
     const msgCount = document.getElementById('msgCount');
     const qrcodeCanvas = document.getElementById('qrcodeCanvas');
+
+    // 第二页涟漪画布
+    const showcaseCanvas = document.getElementById('showcaseCanvas');
+    const showcaseCtx = showcaseCanvas.getContext('2d');
+
+    // 全局状态变量
+    let showcaseRippleInterval = null;
+    let activeShowcaseItems = []; // 跟踪当前显示的弹幕
+    let showcaseItemCount = 0; // 当前3秒内生成的弹幕计数
+    let countResetTimer = null; // 计数重置定时器
 
     // 初始化LeanCloud
     try {
@@ -601,7 +659,7 @@
         showToast('二维码生成失败', 'error');
     }
 
-    // ================== 3. 工具函数 ===================
+    // ================== 工具函数 ===================
     // 气泡提示
     function showToast(message, type = 'success') {
         toast.textContent = message;
@@ -633,7 +691,7 @@
         return `${date.getFullYear()}-${(date.getMonth()+1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`;
     }
 
-    // ================== 4. 云数据库数据管理（替换localStorage）===================
+    // ================== 云数据库数据管理 ===================
     // 获取所有感谢数据（从云数据库拉取）
     async function getGratitudeData() {
         try {
@@ -679,7 +737,7 @@
         const data = await getGratitudeData();
         totalCountEl.textContent = data.length;
         if (data.length > 0) {
-            const latest = data[data.length - 1];
+            const latest = data[0];
             latestTimeEl.textContent = formatTime(latest.timestamp);
         } else {
             latestTimeEl.textContent = '暂无';
@@ -696,7 +754,7 @@
         }
     }, 3000);
 
-    // ================== 5. Excel导出功能（从云数据库拉取数据）===================
+    // ================== Excel导出功能 ===================
     async function exportToExcel() {
         const data = await getGratitudeData();
         if (data.length === 0) {
@@ -725,7 +783,7 @@
         showToast('Excel数据导出成功！');
     }
 
-    // ================== 6. 涟漪动画 ===================
+    // ================== 涟漪动画 ===================
     const canvas = document.getElementById('gratitudeCanvas');
     const ctx = canvas.getContext('2d');
 
@@ -733,10 +791,18 @@
     function resizeCanvas() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
+
+        // 第二页画布也自适应
+        showcaseCanvas.width = window.innerWidth;
+        showcaseCanvas.height = window.innerHeight;
+
+        // 根据屏幕尺寸调整最大显示数量
+        CONFIG.maxShowcaseItems = window.innerWidth < 768 ? 10 : 20;
     }
     window.onresize = resizeCanvas;
     resizeCanvas();
 
+    // 第一页涟漪
     let ripples = [];
     function addRipple(x, y, color = 'rgba(24,144,255,0.4)', size = 15, speed = 2) {
         ripples.push({ x, y, r: size, alpha: 0.8, color, speed });
@@ -770,7 +836,54 @@
         }
     });
 
-    // ================== 7. 输入界面弹幕功能 ===================
+    // 第二页涟漪效果
+    let showcaseRipples = [];
+    function addShowcaseRipple(x, y, color = 'rgba(255,255,255,0.5)', size = 15, speed = 2) {
+        showcaseRipples.push({ x, y, r: size, alpha: 0.8, color, speed });
+    }
+    function drawShowcaseRipples() {
+        showcaseCtx.clearRect(0, 0, showcaseCanvas.width, showcaseCanvas.height);
+        for (const r of showcaseRipples) {
+            showcaseCtx.beginPath();
+            showcaseCtx.arc(r.x, r.y, r.r, 0, 2 * Math.PI);
+            const color = r.color.replace(/0\.\d+/, r.alpha.toFixed(2));
+            showcaseCtx.strokeStyle = color;
+            showcaseCtx.lineWidth = Math.max(0.5, 6 - r.r / 40);
+            showcaseCtx.stroke();
+            r.r += r.speed;
+            r.alpha *= 0.95;
+        }
+        showcaseRipples = showcaseRipples.filter(r => r.alpha > 0.1);
+    }
+    // 第二页自动生成涟漪
+    function startShowcaseRipples() {
+        stopShowcaseRipples();
+        showcaseRippleInterval = setInterval(() => {
+            if (showcaseContainer.style.display === 'flex') {
+                const rx = Math.random() * showcaseCanvas.width;
+                const ry = Math.random() * showcaseCanvas.height;
+                const speed = 1.5 + Math.random() * 1;
+                const alpha = 0.3 + Math.random() * 0.2;
+                addShowcaseRipple(rx, ry, `rgba(255,255,255,${alpha})`, 10, speed);
+            }
+        }, 1500); // 涟漪生成间隔1.5秒
+    }
+    // 停止第二页涟漪
+    function stopShowcaseRipples() {
+        if (showcaseRippleInterval) {
+            clearInterval(showcaseRippleInterval);
+            showcaseRippleInterval = null;
+        }
+    }
+    // 第二页点击涟漪
+    showcaseContainer.addEventListener('click', (e) => {
+        if (showcaseContainer.style.display === 'flex') {
+            addShowcaseRipple(e.clientX, e.clientY, 'rgba(255,255,255,0.7)', 15, 2.5);
+            setTimeout(() => addShowcaseRipple(e.clientX, e.clientY, 'rgba(255,255,255,0.5)', 20, 2), 200);
+        }
+    });
+
+    // ================== 输入界面弹幕功能 ===================
     let gratitudeList = [];
 
     // 投放感谢（核心逻辑）
@@ -813,9 +926,9 @@
             element: gratitudeEl,
             x: initX,
             y: initY,
-            life: 50 + Math.random() * 50, // 5~10秒生命周期
-            floatX: (Math.random() - 0.5) * 1.2,
-            floatY: (Math.random() - 0.5) * 0.8
+            life: 80 + Math.random() * 60, // 生命周期8~14秒
+            floatX: (Math.random() - 0.5) * 0.8, // 水平漂浮速度变慢
+            floatY: (Math.random() - 0.5) * 0.5  // 垂直漂浮速度变慢
         });
 
         // 触发投放涟漪
@@ -866,14 +979,170 @@
     }
     setInterval(updateGratitudes, 50);
 
-    // ================== 8. 全屏弹幕展示功能（慢速版）===================
+    // ================== 全屏弹幕展示功能（气泡效果）===================
+    // 初始化计数重置定时器
+    function initCountResetTimer() {
+        if (countResetTimer) clearInterval(countResetTimer);
+        // 每3秒重置一次计数
+        countResetTimer = setInterval(() => {
+            showcaseItemCount = 0;
+        }, CONFIG.timeWindow);
+    }
+
+    // 检查是否可以添加新弹幕
+    function canAddNewItem() {
+        return showcaseItemCount < CONFIG.maxItemsPerWindow;
+    }
+
+    // 添加单个展示弹幕
+    function addShowcaseItem(item) {
+        if (!canAddNewItem()) return false;
+
+        const maxW = window.innerWidth;
+        const maxH = window.innerHeight;
+        const contentText = item.who ? `致 ${item.who}：${item.msg}` : item.msg;
+
+        // 检查是否已存在
+        if (activeShowcaseItems.some(i => i.id === item.id)) return false;
+
+        const gratitudeEl = document.createElement('div');
+        gratitudeEl.className = 'showcase-gratitude';
+        gratitudeEl.textContent = contentText;
+
+        // 随机位置（均匀分布，避免重叠）
+        const initX = Math.random() * (maxW - 250) + 30;
+        const initY = Math.random() * (maxH - 150) + 100;
+        gratitudeEl.style.left = `${initX}px`;
+        gratitudeEl.style.top = `${initY}px`;
+
+        // 随机延迟出现（0.3~1秒），避免同时弹出
+        gratitudeEl.style.animationDelay = `${0.3 + Math.random() * 0.7}s`;
+
+        showcaseContent.appendChild(gratitudeEl);
+
+        // 随机生命周期
+        const lifeTime = CONFIG.itemLifeRange[0] + Math.random() * (CONFIG.itemLifeRange[1] - CONFIG.itemLifeRange[0]);
+        const expireTime = Date.now() + lifeTime * 1000;
+
+        // 存储弹幕信息
+        const itemData = {
+            id: item.id,
+            element: gratitudeEl,
+            x: initX,
+            y: initY,
+            expireTime: expireTime,
+            floatX: (Math.random() - 0.5) * 0.2, // 缓慢漂浮
+            floatY: (Math.random() - 0.5) * 0.15, // 缓慢漂浮
+            lifeTime: lifeTime * 1000,
+            startTime: Date.now()
+        };
+
+        activeShowcaseItems.push(itemData);
+        showcaseItemCount++; // 增加计数
+
+        // 启动消失动画
+        setTimeout(() => {
+            gratitudeEl.style.animation = 'fadeOut 1.5s forwards ease-in';
+        }, (lifeTime - 1.5) * 1000);
+
+        // 动画效果
+        animateShowcaseGratitude(itemData);
+
+        return true;
+    }
+
+    // 展示界面弹幕漂浮动画（气泡效果）
+    function animateShowcaseGratitude(item) {
+        function update() {
+            // 检查是否已过期
+            if (Date.now() > item.expireTime) return;
+
+            // 计算生命周期百分比
+            const lifePercent = 1 - (Date.now() - item.startTime) / item.lifeTime;
+
+            // 缓慢波浪式漂浮
+            const waveX = Math.sin((Date.now() / 1000) * 0.8) * 8;
+            const waveY = Math.cos((Date.now() / 1000) * 0.6) * 6;
+            const driftX = item.floatX * (Date.now() - item.startTime) / 1000;
+            const driftY = item.floatY * (Date.now() - item.startTime) / 1000;
+
+            const currentX = item.x + waveX + driftX;
+            const currentY = item.y + waveY + driftY;
+
+            // 边界检测：超出屏幕则调整
+            const maxW = window.innerWidth;
+            const maxH = window.innerHeight;
+            if (currentX < 30) item.floatX = Math.abs(item.floatX);
+            if (currentX > maxW - 250) item.floatX = -Math.abs(item.floatX);
+            if (currentY < 100) item.floatY = Math.abs(item.floatY);
+            if (currentY > maxH - 80) item.floatY = -Math.abs(item.floatY);
+
+            // 更新位置
+            item.element.style.left = `${currentX}px`;
+            item.element.style.top = `${currentY}px`;
+
+            // 生命周期后半段开始缓慢淡出
+            if (lifePercent < 0.3) {
+                item.element.style.opacity = lifePercent * 3;
+            }
+
+            requestAnimationFrame(update);
+        }
+
+        update();
+    }
+
+    // 渲染展示界面的弹幕
+    async function renderShowcaseGratitudes() {
+        const data = await getGratitudeData();
+        const maxW = window.innerWidth;
+        const maxH = window.innerHeight;
+
+        // 移除已过期的弹幕
+        activeShowcaseItems = activeShowcaseItems.filter(item => {
+            if (item.expireTime < Date.now()) {
+                try { item.element.remove(); } catch (e) {}
+                return false;
+            }
+            return true;
+        });
+
+        // 计算需要显示的数据量（限制最大数量）
+        const displayCount = Math.min(data.length, CONFIG.maxShowcaseItems);
+        const displayData = data.slice(0, displayCount);
+
+        // 筛选出尚未显示的新弹幕
+        const existingIds = activeShowcaseItems.map(item => item.id);
+        const newItems = displayData.filter(item => !existingIds.includes(item.id));
+
+        // 分批添加新弹幕（控制速度）
+        let addedCount = 0;
+        const addBatch = () => {
+            if (addedCount >= newItems.length) return;
+
+            const success = addShowcaseItem(newItems[addedCount]);
+            if (success) {
+                addedCount++;
+            }
+
+            // 每隔一段时间添加一条
+            setTimeout(addBatch, CONFIG.itemInterval);
+        };
+
+        addBatch();
+    }
+
     // 展示界面背景气泡生成
-    function createBubbles(count = 30) {
+    function createBubbles(count = 20) {
         const content = document.getElementById('showcaseContent');
+        // 先清空现有气泡
+        const existingBubbles = content.querySelectorAll('.bubble');
+        existingBubbles.forEach(el => el.remove());
+
         for (let i = 0; i < count; i++) {
             const bubble = document.createElement('div');
             bubble.className = 'bubble';
-            const size = 10 + Math.random() * 50;
+            const size = 10 + Math.random() * 40;
             const left = Math.random() * 100;
             const delay = Math.random() * 10;
             bubble.style.width = `${size}px`;
@@ -883,90 +1152,19 @@
             content.appendChild(bubble);
         }
     }
-    // 初始化展示界面气泡
-    createBubbles();
-
-    // 渲染展示界面的弹幕
-    async function renderShowcaseGratitudes() {
-        const content = document.getElementById('showcaseContent');
-        const data = await getGratitudeData();
-        const maxW = window.innerWidth;
-        const maxH = window.innerHeight;
-
-        // 清空现有弹幕（保留气泡）
-        const existingGratitudes = content.querySelectorAll('.showcase-gratitude');
-        existingGratitudes.forEach(el => el.remove());
-
-        // 渲染所有感谢数据
-        data.forEach((item, index) => {
-            const contentText = item.who ? `致 ${item.who}：${item.msg}` : item.msg;
-            const gratitudeEl = document.createElement('div');
-            gratitudeEl.className = 'showcase-gratitude';
-            gratitudeEl.textContent = contentText;
-
-            // 随机位置（均匀分布）
-            const initX = Math.random() * (maxW - 350) + 50;
-            const initY = Math.random() * (maxH - 200) + 100;
-            gratitudeEl.style.left = `${initX}px`;
-            gratitudeEl.style.top = `${initY}px`;
-            // 错开动画延迟，避免同时出现
-            gratitudeEl.style.animationDelay = `${index * 0.1}s`;
-
-            content.appendChild(gratitudeEl);
-
-            // 弹幕漂浮动画（慢速版）
-            animateShowcaseGratitude(gratitudeEl, initX, initY);
-        });
-    }
-
-    // 展示界面弹幕漂浮动画（循环流动-慢速）
-    function animateShowcaseGratitude(el, initX, initY) {
-        const maxW = window.innerWidth;
-        const maxH = window.innerHeight;
-        let life = 150 + Math.random() * 150; // 15~30秒生命周期（延长）
-        let floatX = (Math.random() - 0.5) * 0.8; // 横向速度减慢
-        let floatY = (Math.random() - 0.5) * 0.6; // 纵向速度减慢
-
-        function update() {
-            if (life <= 0) {
-                // 重置位置和生命周期
-                el.style.left = `${Math.random() * (maxW - 350) + 50}px`;
-                el.style.top = `${Math.random() * (maxH - 200) + 100}px`;
-                el.style.opacity = 0.9;
-                life = 150 + Math.random() * 150;
-                floatX = (Math.random() - 0.5) * 0.8;
-                floatY = (Math.random() - 0.5) * 0.6;
-            }
-
-            // 波浪式漂浮（频率减慢）
-            const waveX = Math.sin(life / 15) * 12;
-            const waveY = Math.cos(life / 20) * 8;
-            const currentX = parseFloat(el.style.left) + waveX + floatX;
-            const currentY = parseFloat(el.style.top) + waveY + floatY;
-
-            // 边界检测：超出屏幕则反弹
-            if (currentX < 50 || currentX > maxW - 300) floatX *= -1;
-            if (currentY < 100 || currentY > maxH - 100) floatY *= -1;
-
-            // 更新位置和透明度
-            el.style.left = `${currentX}px`;
-            el.style.top = `${currentY}px`;
-            el.style.opacity = Math.max(life / 180, 0.3);
-
-            // 减慢生命周期消耗
-            life -= 0.15;
-            requestAnimationFrame(update);
-        }
-
-        update();
-    }
 
     // 切换到展示界面
     async function openShowcase() {
         showcaseContainer.style.display = 'flex';
+        // 初始化状态
+        showcaseItemCount = 0;
+        initCountResetTimer();
         // 渲染弹幕和更新统计
         await updateStats();
-        await renderShowcaseGratitudes();
+        createBubbles();
+        renderShowcaseGratitudes();
+        // 启动涟漪动画
+        startShowcaseRipples();
         // 暂停输入界面的涟漪动画
         canvas.style.display = 'none';
     }
@@ -974,12 +1172,24 @@
     // 切换回输入界面
     function closeShowcase() {
         showcaseContainer.style.display = 'none';
+        // 停止涟漪动画和计数定时器
+        stopShowcaseRipples();
+        if (countResetTimer) {
+            clearInterval(countResetTimer);
+            countResetTimer = null;
+        }
+        // 清空活跃弹幕
+        activeShowcaseItems.forEach(item => {
+            try { item.element.remove(); } catch (e) {}
+        });
+        activeShowcaseItems = [];
+        showcaseItemCount = 0;
         // 恢复涟漪动画
         canvas.style.display = 'block';
         resizeCanvas();
     }
 
-    // ================== 9. 事件绑定 ===================
+    // ================== 事件绑定 ===================
     // 投放感谢
     releaseBtn.addEventListener('click', releaseGratitude);
     [whoInput, msgInput].forEach(input => {
@@ -997,7 +1207,7 @@
     // 导出Excel
     exportBtn.addEventListener('click', exportToExcel);
 
-    // ================== 10. 初始化 ===================
+    // ================== 初始化 ===================
     // 页面加载时更新统计
     window.onload = async () => {
         await updateStats();
@@ -1006,6 +1216,7 @@
     // 动画主循环
     function animate() {
         drawRipples();
+        drawShowcaseRipples();
         requestAnimationFrame(animate);
     }
     animate();
